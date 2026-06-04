@@ -1,0 +1,132 @@
+; Maybe divide into two state machines?
+
+.program AcsiInterface
+
+; Use four of the delay bits as a side set. (outpins + opt)
+.side_set 3 opt
+
+; Input pins
+.define ACSI_ACK	8
+.define ACSI_CS		9
+.define ACSI_A1		10
+.define ACSI_RW		11
+
+; Sideset masks for pins BUFFER_RW, ACSI_IRQ, ACSI_DRQ
+.define RirqLdrqL	0b100
+.define RirqLdrqH	0b101
+.define RirqHdrqL	0b110
+.define RirqHdrqH	0b111
+.define WirqLdrqL	0b000
+.define WirqLdrqH	0b001
+.define WirqHdrqL	0b010
+.define WirqHdrqH	0b011
+
+
+public AcsiDeviceLoop:
+.wrap_target
+WaitForCmd:
+	wait 1 PIN ACSI_CS [1]				; Make sure we wait for last command byte to end.
+
+	mov osr, null [1]					; Sets osr to null and osr count to 0 (full)
+	out PINDIRS, 8 side RirqHdrqH		; Set data pins to input, buffer to read, irq and drq high
+	out null, 24						; Empties osr
+
+WaitForA1CS:
+	wait 0 PIN ACSI_CS					; Wait for CS signal
+	jmp PIN WaitForA1CS					; Check if A1 is signalled (low) and if not, check again.
+
+	in PINS, 8							; read command byte
+	in null, 24							; fill isr with zeroes and autopush to fifo
+
+public AcsiCmdResponse:
+	out x, 32							; Get c++ response of how many bytes we want to fetch. 0 if device is ignored.
+	jmp !x, WaitForCmd					; 4 for standard AHDI commands, 5/8 for ICD
+
+CmdBytesLoop:	
+	wait 1 PIN ACSI_CS					; Wait for cs to reset, then set irq to say that we are ready for more.
+	wait 0 PIN ACSI_CS side RirqLdrqH	; Wait for cs to tell us that there is new data.
+	in PINS, 8							; Fetch data and reset irq
+	jmp x--, CmdBytesLoop side RirqHdrqH
+;	in null, 24							; As we have fetched 5 bytes, we need some more bits to autopush to fifo.
+	push block							; We don't know how many bytes we end up with, so push whatever we got!
+	;wait 1 PIN ACSI_CS					; Wait for cs to reset.
+
+; Get reaction from c++ code:
+; 1. read dma count (can be zero and must be even 4)
+; 2. write dma count (can be zero and must be even 4) followed by block of bytes to write
+; 3. status byte
+; So the minimum is three words.
+; Read and write count can by Atari limits be max 255*512
+
+	out x, 32
+	jmp ReadDMABegin
+ReadDMA:
+	wait 0 PIN ACSI_ACK side RirqHdrqL
+	in PINS, 8
+	wait 1 PIN ACSI_ACK side RirqHdrqH
+ReadDMABegin:
+	jmp x--, ReadDMA
+
+; Changing buffer direction here is a little dangerous.
+; The ACSI port is most likely still in write mode, and setting our buffer to output
+; can and will connect ones to zeroes... Meaning short circuit.
+; There are several ways to handle this that will waste instruction space that we don't have...
+; So the solution (taken from Atari HD schematics) is to modify the hardware,
+; and add small resistors to the data lines, to limit current flow in case of short circuit.
+	mov osr, ! null
+	out PINDIRS, 8 side WirqHdrqH
+	out null, 24
+	
+	out x, 32
+	jmp WriteDMABegin
+WriteDMA:
+	out PINS, 8
+	wait 0 PIN ACSI_ACK side WirqHdrqL
+	wait 1 PIN ACSI_ACK side WirqHdrqH [1]
+WriteDMABegin:
+	jmp x--, WriteDMA [1]
+
+StatusByte:
+	out PINS, 8
+	wait 0 PIN ACSI_CS side WirqLdrqH
+.wrap
+
+	
+
+% c-sdk {
+
+	#include "hardware/clocks.h"
+	#include "hardware/gpio.h"
+
+	static inline void AcsiInterface_program_init(PIO pio, uint sm, uint offset, uint outSignals, uint data)
+	{
+		for (int i = 0; i < 11; ++i)
+		{
+			pio_gpio_init(pio, data + i);
+		}
+		for (int i = 0; i < 3; ++i)
+		{
+			pio_gpio_init(pio, outSignals + i);
+		}
+		pio_sm_set_consecutive_pindirs(pio, sm, data, 11, false);
+		pio_sm_set_consecutive_pindirs(pio, sm, outSignals, 3, true);
+
+		pio_sm_config c = AcsiInterface_program_get_default_config(offset);
+
+		// IO mapping
+		sm_config_set_in_pins(&c, data);	// data + 8  = ack, cs, a1
+		sm_config_set_out_pins(&c, data, 8);
+		sm_config_set_sideset_pins(&c, outSignals);
+		sm_config_set_jmp_pin(&c, data + 10);	// A1 pin!
+
+		// Shift to right, autopush/pull enabled
+		sm_config_set_in_shift(&c, true, true, 32);
+		sm_config_set_out_shift(&c, true, true, 32);
+		
+		//pio_sm_set_clkdiv(pio, sm, 4);
+		pio_sm_init(pio, sm, offset + AcsiInterface_offset_AcsiDeviceLoop, &c);
+
+	}
+
+%}
+
