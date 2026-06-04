@@ -19,4 +19,8 @@ KiCad project with schematics and PCB design.
 firmware:  
 Raspberry Pi Pico sources for the hardware.  
 
+## License:
+This project is MIT licensed.  
+The submodule: [no-OS-FatFS-SD-SPI-RPi-Pico](https://github.com/carlk3/no-OS-FatFS-SD-SPI-RPi-Pico) is a separate project and is Apache-2.0 licensed.  
+
 
