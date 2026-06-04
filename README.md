@@ -1,5 +1,3 @@
-# Hardware for easy file transfer and serial communication between Atari 16/32 bit computers and PC.
-
 ## Features:
 * ACSI hard disk emulation using SD-card.
 * Multiple hard disk images on same SD-card.
