@@ -31,9 +31,9 @@
 #define BUFFER_RW	OUT_SIGNALS + 2
 
 #define ACSI_RST	26	// Atari reset line.
-#define BUFFER_OE	27	// LOW will enable all io pins.
+#define BUFFER_OE	27	// LOW will enable all io pins and ACK, CS, A1, RST.
 
-#define DEBUG_PIN	28	// To trigger oscilloscope.
+#define DRQIRQ_OE	28	// LOW will enable IRQ and DRQ pins.
 
 // State machine
 #define PIO_ACSI	pio0
@@ -78,11 +78,11 @@ bool Acsi::Init(DriveInterface *drives, int32_t baseId)
 
 	gpio_init(BUFFER_OE);
 	gpio_set_dir(BUFFER_OE, GPIO_OUT);
-	gpio_put(BUFFER_OE, true);
+	gpio_put(BUFFER_OE, false);
 
-	gpio_init(DEBUG_PIN);
-	gpio_set_dir(DEBUG_PIN, GPIO_OUT);
-	gpio_put(DEBUG_PIN, false);
+	gpio_init(DRQIRQ_OE);
+	gpio_set_dir(DRQIRQ_OE, GPIO_OUT);
+	gpio_put(DRQIRQ_OE, false);
 
 	return result;
 }
@@ -101,7 +101,7 @@ bool Acsi::GetWithTimeout(uint32_t timeout, uint32_t* data) const
 	return true;
 }
 
-void Acsi::ResetPio(void)
+void __not_in_flash_func(Acsi::ResetPio)(void)
 {
 	pio_sm_set_enabled(PIO_ACSI, SM_ACSI, false);
 	PrintPioInfo();
@@ -127,18 +127,17 @@ void Acsi::ClearAllErrors(void)
 // Look closer at PIO_ACSI->INPUT_SYNC_BYPASS,
 // __time_critical_func
 // https://github.com/raspberrypi/pico-examples/blob/master/gpio/hello_gpio_irq/hello_gpio_irq.c for rst
-void Acsi::Start(void)
+void __not_in_flash_func(Acsi::Start)(void)
 {
 	uint32_t cmdCounter = 0;	// Used for debugging.
 	uint32_t firstByte;
 	uint32_t cmdLen;
 	uint32_t myRXFifoStatFlag = 1u << (PIO_FSTAT_RXEMPTY_LSB + SM_ACSI); 
 	int32_t numLuns = (int32_t)m_drives->GetNumOfLuns();
-	ClearAllErrors();
-	gpio_put(BUFFER_OE, false);	// Enable contact between Atari and Pico.
-	pio_sm_set_enabled(PIO_ACSI, SM_ACSI, true);
 	while (true)
 	{
+		ClearAllErrors();
+		ResetPio();
 		while (gpio_get(ACSI_RST))	// RST is active low.
 		{
 			// Pio code is at or soon to be at  AcsiInterface WaitForCmd
@@ -157,13 +156,6 @@ void Acsi::Start(void)
 
 				if (cmdLen != 0)
 				{
-					/*
-					++cmdCounter;
-					if (cmdCounter == 12)
-					{
-						gpio_put(DEBUG_PIN, true);	// Oscilloscope starts samling now.
-					}
-					*/
 					cmdLen++;	// Add one byte that the pio loop delivers.
 					// Fetch bytes from pio AcsiInterface CmdBytesLoop
 					bool gotCmd = true;
@@ -199,8 +191,6 @@ void Acsi::Start(void)
 			}
 		}
 		Serial::self->WriteToUsb("ATARI reset!\r\n");
-		ClearAllErrors();
-		ResetPio();
 	}
 }
 
