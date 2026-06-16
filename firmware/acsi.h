@@ -38,7 +38,7 @@ private:
 private:
 	DriveInterface *m_drives;
 	int32_t m_baseId;
-	
+	uint m_pio_offset;	
 	uint32_t m_cmd;
 	int32_t m_device;
 	uint32_t m_errorCode;

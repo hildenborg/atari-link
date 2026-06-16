@@ -69,8 +69,8 @@ bool Acsi::Init(DriveInterface *drives, int32_t baseId)
 		m_fastResponse[(i << 5) + 0x1f] = 11 - 2;	// 11 bytes icd - 1 we already got, and - 1 for loop. 
 	}
 	
-    uint offset = pio_add_program(PIO_ACSI, &AcsiInterface_program);
-    AcsiInterface_program_init(PIO_ACSI, SM_ACSI, offset, OUT_SIGNALS, DATA_BASE);
+    m_pio_offset = pio_add_program(PIO_ACSI, &AcsiInterface_program);
+    AcsiInterface_program_init(PIO_ACSI, SM_ACSI, m_pio_offset, OUT_SIGNALS, DATA_BASE);
 
 	gpio_init(ACSI_RST);
 	gpio_set_dir(ACSI_RST, GPIO_IN);
@@ -110,8 +110,17 @@ void __not_in_flash_func(Acsi::ResetPio)(void)
 	while((gpio_get_all() & mask) != mask)
 	{
 	}
+
+	// Turn buffers off and on again.
+	gpio_put(BUFFER_OE, true);
+	gpio_put(DRQIRQ_OE, true);
+	sleep_ms(1);
+	gpio_put(BUFFER_OE, false);
+	gpio_put(DRQIRQ_OE, false);
+
 	pio_sm_clear_fifos(PIO_ACSI, SM_ACSI);
 	pio_sm_restart(PIO_ACSI, SM_ACSI);
+	pio_sm_exec(PIO_ACSI, SM_ACSI, pio_encode_jmp(m_pio_offset));
 	pio_sm_set_enabled(PIO_ACSI, SM_ACSI, true);
 }
 
