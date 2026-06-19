@@ -12,7 +12,7 @@ The hardware is based around the Raspberry Pico and the formware source is in th
 The project is dependent on a submodule, so do not forget to do `git submodule init` and `git submodule update` after cloning this git repository.  
 
 ## Setup:
-If you have built the hardware, and just want to get going, then download [atari-link.zip](https://github.com/hildenborg/atari-link/releases/download/Release1/atari-link.zip) and extract its contents.  
+If you have built the hardware, and just want to get going, then download [atari-link.zip](https://github.com/hildenborg/atari-link/releases/download/Release1_1/atari_link.zip) and extract its contents.  
 Flash the Pico with "atari_link.uf2" and put "config.txt, "tos32mb_ahdi5_boot.img" and "tos32mb_gdbsrv.img" on a FAT32 formatted SD-card.  
 This will set you up with a development system that should work on pretty much anything Atari have made.  
 You may need to edit the "config.txt" file if you have other hard drives connected, so there aren't any device id collision.  
