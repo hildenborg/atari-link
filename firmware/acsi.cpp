@@ -274,17 +274,17 @@ int Acsi::SeekAddressGetNum10(uint32_t *seekAddress) const
 uint32_t Acsi::Command_03(void)
 {
 	int len = (m_cmdBuf[0] >> 24) & 0xff;
-	
-	for (int i = len; --i >= 0;)
-	{
-		m_dataBuf[i] = 0;
-	}
-	
-	m_dataBuf[0] = 0x70;
-	m_dataBuf[2] = (uint8_t)((m_errorCode >> 16) & 0xff);
-	if (len >= 16)
+	if (len > 16)
 	{
 		len = 16;
+	}
+	len = (len + 3) & ~3;	// The pio sends whole 32-bit words.
+	memset(m_dataBuf, 0, 16);
+
+	m_dataBuf[0] = 0x70;
+	m_dataBuf[2] = (uint8_t)((m_errorCode >> 16) & 0xff);
+	if (len == 16)
+	{
 		m_dataBuf[7] = (uint8_t)(len - 8);
 		m_dataBuf[12] = (uint8_t)((m_errorCode >> 8) & 0xff);
 		m_dataBuf[13] = (uint8_t)((m_errorCode) & 0xff);
