@@ -218,7 +218,7 @@ int Acsi::SeekAddressGetNum10(uint32_t *seekAddress) const
 	// FatFs is limited to unsigned 32 bit, so we are too.
 	// Meaning that for position, we can skip the msb
 	*seekAddress = (((m_cmdBuf[0] >> 8) & 0xff0000) | ((m_cmdBuf[1] << 8) & 0xff00) | ((m_cmdBuf[1] >> 8) & 0xff));
-	return (((m_cmdBuf[1] >> 16) & 0xff00) || (m_cmdBuf[2] & 0xff));
+	return (((m_cmdBuf[1] >> 16) & 0xff00) | (m_cmdBuf[2] & 0xff));
 }
 
 uint32_t Acsi::Command_03(void)
@@ -379,7 +379,7 @@ uint32_t Acsi::Command_28(void)
 	size_t size = m_drives->GetLSectorCount(m_device);
 	uint32_t pos = 0;
 	int num = SeekAddressGetNum10(&pos);
-	if ((size - pos) < num)
+	if (pos > size || (size - pos) < (uint32_t)num)
 	{
 		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0); // Read 0 bytes from Atari
 		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0); // Write 0 bytes to Atari
@@ -395,7 +395,7 @@ uint32_t Acsi::Command_28(void)
 		return statusByte;
 	}
 	pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0);	// Read 0 bytes from Atari
-	pio_sm_put_blocking(PIO_ACSI, SM_ACSI, num);	// Write num bytes to Atari
+	pio_sm_put_blocking(PIO_ACSI, SM_ACSI, num * LOGICAL_BLOCK);	// Write num blocks to Atari
 	statusByte = 0;	// This is fine...
 
 	uint32_t endpos = pos + num;
@@ -408,8 +408,13 @@ uint32_t Acsi::Command_28(void)
 		{
 			burst = BURSTLEN;
 		}
-		m_drives->Read(m_device, pos, 0, burst * LOGICAL_BLOCK, m_dataBuf);
-		for (int i = 0; i < (burst >> 2); ++i)
+		if (!m_drives->Read(m_device, pos, 0, burst * LOGICAL_BLOCK, m_dataBuf))
+		{
+			// The data length is already promised to the pio, so keep sending and report the error in the status byte.
+			statusByte = 2;
+			m_errorCode = MEDIA_ERROR;
+		}
+		for (uint32_t i = 0; i < ((burst * LOGICAL_BLOCK) >> 2); ++i)
 		{
 			pio_sm_put_blocking(PIO_ACSI, SM_ACSI, buf[i]);
 		}
@@ -426,7 +431,7 @@ uint32_t Acsi::Command_2a(void)
 	size_t size = m_drives->GetLSectorCount(m_device);
 	uint32_t pos = 0;
 	int num = SeekAddressGetNum10(&pos);
-	if ((size - pos) < num)
+	if (pos > size || (size - pos) < (uint32_t)num)
 	{
 		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0); // Read 0 bytes from Atari
 		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0); // Write 0 bytes to Atari
@@ -449,7 +454,7 @@ uint32_t Acsi::Command_2a(void)
 		return statusByte;
 	}
 
-	pio_sm_put_blocking(PIO_ACSI, SM_ACSI, num); // Read num bytes from Atari
+	pio_sm_put_blocking(PIO_ACSI, SM_ACSI, num * LOGICAL_BLOCK); // Read num blocks from Atari
 	statusByte = 0;	// This is fine...
 
 	uint32_t endpos = pos + num;
@@ -462,11 +467,15 @@ uint32_t Acsi::Command_2a(void)
 		{
 			burst = BURSTLEN;
 		}
-		for (int i = 0; i < (burst >> 2); ++i)
+		for (uint32_t i = 0; i < ((burst * LOGICAL_BLOCK) >> 2); ++i)
 		{
 			buf[i] = pio_sm_get_blocking(PIO_ACSI, SM_ACSI);
 		}
-		m_drives->Write(m_device, pos, 0, burst * LOGICAL_BLOCK, m_dataBuf);
+		if (!m_drives->Write(m_device, pos, 0, burst * LOGICAL_BLOCK, m_dataBuf))
+		{
+			statusByte = 2;
+			m_errorCode = MEDIA_ERROR;
+		}
 		pos += BURSTLEN;
 	}
 	#undef BURSTLEN
