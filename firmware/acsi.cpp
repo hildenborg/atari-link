@@ -60,8 +60,18 @@ bool Acsi::Init(DriveInterface *drives, int32_t baseId)
 	
 	// Create a list of response lengths for the device + command combination.
 	memset(m_fastResponse, 0, 256);
-	uint32_t numLuns = m_drives->GetNumOfLuns();
-	for (uint32_t i = baseId; i < (numLuns + baseId); ++i)
+	// Only ids 0-7 exist on the ACSI bus; drives that don't fit are not exposed to the Atari.
+	// A negative base id is invalid, and exposes no drives.
+	int32_t lastId = baseId + (int32_t)m_drives->GetNumOfLuns();
+	if (baseId < 0)
+	{
+		lastId = baseId;	// Loop below runs zero times.
+	}
+	else if (lastId > 8)
+	{
+		lastId = 8;
+	}
+	for (int32_t i = baseId; i < lastId; ++i)
 	{
 		for (uint32_t j = 0; j <  0x1f; j++)
 		{
