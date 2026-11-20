@@ -1,6 +1,10 @@
 #include <string.h>
 #include "image.h"
 
+// FatFs is built with FF_FS_REENTRANT 0, and both cores (ACSI and USB) access it.
+// All images live on the same SD card volume, so one mutex must guard every FatFs call.
+auto_init_mutex(s_fatfsMutex);
+
 
 #ifdef USB_DIFF_LOGGING
 void LogWriteNamedValue(Image *image, const char* name, uint32_t value)
@@ -182,7 +186,7 @@ bool AcsiInterface::Read(uint32_t lun, uint32_t sector, uint32_t offset, uint32_
 {
 	bool result = false;
 	const Lun& l = m_luns[lun];
-	mutex_enter_blocking(&l.image->mutex);
+	mutex_enter_blocking(&s_fatfsMutex);
 	if (l.image->acsiError != NEED_UPDATE)
 	{
 		unsigned int numread = 0;
@@ -192,7 +196,7 @@ bool AcsiInterface::Read(uint32_t lun, uint32_t sector, uint32_t offset, uint32_
 		result &= numread == length;
 		l.image->acsiError = result ? RW_ERROR : NO_ERROR;
 	}
-	mutex_exit(&l.image->mutex);
+	mutex_exit(&s_fatfsMutex);
 	return result;
 }
 
@@ -200,7 +204,7 @@ bool AcsiInterface::Write(uint32_t lun, uint32_t sector, uint32_t offset, uint32
 {
 	bool result = false;
 	Lun& l = m_luns[lun];
-	mutex_enter_blocking(&l.image->mutex);
+	mutex_enter_blocking(&s_fatfsMutex);
 	if (l.image->acsiError != NEED_UPDATE)
 	{
 		if (l.image->drive.acsiExposure == WRITEABLE)
@@ -218,7 +222,7 @@ bool AcsiInterface::Write(uint32_t lun, uint32_t sector, uint32_t offset, uint32
 			l.image->acsiError = WRITE_PROTECTED;
 		}
 	}
-	mutex_exit(&l.image->mutex);
+	mutex_exit(&s_fatfsMutex);
 	return result;
 }
 
@@ -335,13 +339,13 @@ bool USBInterface::Read(uint32_t lun, uint32_t sector, uint32_t offset, uint32_t
 {
 	bool result = false;
 	const Lun& l = m_luns[lun];
-	mutex_enter_blocking(&l.image->mutex);
+	mutex_enter_blocking(&s_fatfsMutex);
 	if (l.image->usbError != NEED_UPDATE)
 	{
 		result = R_W_CachedSectors(true, lun, sector, offset, length, buffert);
 		l.image->usbError = result ? RW_ERROR : NO_ERROR;
 	}
-	mutex_exit(&l.image->mutex);
+	mutex_exit(&s_fatfsMutex);
 	return result;
 }
 
@@ -349,7 +353,7 @@ bool USBInterface::Write(uint32_t lun, uint32_t sector, uint32_t offset, uint32_
 {
 	bool result = false;
 	Lun& l = m_luns[lun];
-	mutex_enter_blocking(&l.image->mutex);
+	mutex_enter_blocking(&s_fatfsMutex);
 	if (l.image->usbError != NEED_UPDATE)
 	{
 		if (l.image->drive.usbExposure == WRITEABLE)
@@ -362,7 +366,7 @@ bool USBInterface::Write(uint32_t lun, uint32_t sector, uint32_t offset, uint32_
 			l.image->usbError = WRITE_PROTECTED;
 		}
 	}
-	mutex_exit(&l.image->mutex);
+	mutex_exit(&s_fatfsMutex);
 	return result;
 }
 
@@ -415,7 +419,6 @@ bool DriveCollection::LoadImage(const Config::Drive &drive)
 	memset(&image->logHandle, 0, sizeof(FIL));
 #endif
 	memset(&image->fileHandle, 0, sizeof(FIL));
-	mutex_init(&image->mutex);
 	
 	if (FR_OK == f_open(&image->fileHandle, image->drive.imagefile, FA_READ | FA_WRITE))
 	{

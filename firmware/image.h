@@ -41,7 +41,6 @@ public:
 #endif
 
 	mutable FIL fileHandle;
-    mutable mutex_t mutex;
 	const Config::Drive &drive;
 	DriveError acsiError;
 	DriveError usbError;
