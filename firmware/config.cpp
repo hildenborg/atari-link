@@ -9,7 +9,7 @@ static char default_config[] =
 "\n"
 "# RS232 settings (com port).\n"
 "Com:\n"
-"	Baud:		9600\n"
+"	Baud:		19200\n"
 "	Stop:		1\n"
 "	Parity:		0\n"
 "\n"
