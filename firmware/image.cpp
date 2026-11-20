@@ -576,6 +576,8 @@ void DriveCollection::InitTOSImage(Image* image)
 	uint32_t partitionSectors[8];
 	do
 	{
+		memset(partitionType, 0, sizeof(partitionType));
+		memset(partitionSectors, 0, sizeof(partitionSectors));
 		for (uint32_t p = 0; p < maxP; ++p)
 		{
 			uint8_t *pt_p = pt_mbr + 0x1c6 + (p * 12);
@@ -601,6 +603,7 @@ void DriveCollection::InitTOSImage(Image* image)
 #ifdef USB_DIFF_LOGGING
 					LogWriteNamedValue(image, "Cached TOS sector", l_startSector);
 #endif
+					partitionType[p] = type;
 					break;	// Extended boot partition is always the last in list.
 				}		
 				else
