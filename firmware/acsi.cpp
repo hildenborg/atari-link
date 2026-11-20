@@ -41,6 +41,7 @@
 
 Acsi::Acsi(void)
 	: m_errorCode(NO_ERROR)
+	, m_reset(false)
 {
 	m_dataBuf = new uint8_t[LOGICAL_BLOCK * 255];
 }
@@ -97,13 +98,52 @@ bool Acsi::GetWithTimeout(uint32_t timeout, uint32_t* data) const
 			return false;
 		}
 	}
-	*data = pio_sm_get_blocking(PIO_ACSI, SM_ACSI);
+	*data = pio_sm_get(PIO_ACSI, SM_ACSI);	// Fifo is known to be non-empty here.
 	return true;
+}
+
+// Like pio_sm_put_blocking, but gives up if the Atari resets while we wait.
+// Once a reset is seen, all further calls return immediately until ResetPio() clears m_reset.
+bool __not_in_flash_func(Acsi::PioPut)(uint32_t data)
+{
+	while (pio_sm_is_tx_fifo_full(PIO_ACSI, SM_ACSI))
+	{
+		if (m_reset || !gpio_get(ACSI_RST))	// RST is active low.
+		{
+			m_reset = true;
+			return false;
+		}
+	}
+	if (m_reset)
+	{
+		return false;
+	}
+	pio_sm_put(PIO_ACSI, SM_ACSI, data);
+	return true;
+}
+
+// Like pio_sm_get_blocking, but gives up (returns 0) if the Atari resets while we wait.
+uint32_t __not_in_flash_func(Acsi::PioGet)(void)
+{
+	while (pio_sm_is_rx_fifo_empty(PIO_ACSI, SM_ACSI))
+	{
+		if (m_reset || !gpio_get(ACSI_RST))	// RST is active low.
+		{
+			m_reset = true;
+			return 0;
+		}
+	}
+	if (m_reset)
+	{
+		return 0;
+	}
+	return pio_sm_get(PIO_ACSI, SM_ACSI);
 }
 
 void __not_in_flash_func(Acsi::ResetPio)(void)
 {
 	pio_sm_set_enabled(PIO_ACSI, SM_ACSI, false);
+	m_reset = false;
 	PrintPioInfo();
 	// Wait for reset and a1+cs to be set high.
 	uint32_t mask = (1 << ACSI_RST) | (1 << ACSI_A1) | (1 << ACSI_CS);
@@ -147,10 +187,10 @@ void __not_in_flash_func(Acsi::Start)(void)
 	{
 		ClearAllErrors();
 		ResetPio();
-		while (gpio_get(ACSI_RST))	// RST is active low.
+		while (gpio_get(ACSI_RST) && !m_reset)	// RST is active low.
 		{
 			// Pio code is at or soon to be at  AcsiInterface WaitForCmd
-			while ((PIO_ACSI->fstat & myRXFifoStatFlag) == 0)
+			while (!m_reset && (PIO_ACSI->fstat & myRXFifoStatFlag) == 0)
 			{
 				firstByte = PIO_ACSI->rxf[SM_ACSI];	// Ultra quick fifo get.
 				if (firstByte > 255) 
@@ -195,7 +235,7 @@ void __not_in_flash_func(Acsi::Start)(void)
 					m_cmdBuf[lword] = m_cmdBuf[lword] >> (lshift * 8);
 					// Now handle the command.
 					uint32_t statusByte = HardDiskCommand();
-					pio_sm_put_blocking(PIO_ACSI, SM_ACSI, statusByte);
+					PioPut(statusByte);
 				}
 			}
 		}
@@ -240,12 +280,12 @@ uint32_t Acsi::Command_03(void)
 		m_dataBuf[13] = (uint8_t)((m_errorCode) & 0xff);
 	}
 
-	pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0);	// Read 0 bytes from Atari
-	pio_sm_put_blocking(PIO_ACSI, SM_ACSI, len);	// Write len bytes to Atari
+	PioPut(0);	// Read 0 bytes from Atari
+	PioPut(len);	// Write len bytes to Atari
 	uint32_t* buf = (uint32_t*)m_dataBuf;
 	for (int i = 0; i < (len >> 2); ++i)
 	{
-		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, buf[i]);
+		PioPut(buf[i]);
 	}
 	m_drives->ClearError(m_device);
 	return 0;	// Always succeed
@@ -256,21 +296,21 @@ uint32_t Acsi::Command_08(void)
 	uint32_t statusByte = 2;
 	uint32_t pos = 0;
 	int num = SeekAddressGetNum(&pos);
-	pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0);	// Read 0 bytes from Atari
+	PioPut(0);	// Read 0 bytes from Atari
 	num *= LOGICAL_BLOCK;
 	if (m_drives->Read(m_device, pos, 0, num, m_dataBuf))
 	{
 		statusByte = 0;
-		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, num);	// Write num bytes to Atari
+		PioPut(num);	// Write num bytes to Atari
 		uint32_t* buf = (uint32_t*)m_dataBuf;
 		for (int i = 0; i < (num >> 2); ++i)
 		{
-			pio_sm_put_blocking(PIO_ACSI, SM_ACSI, buf[i]);
+			PioPut(buf[i]);
 		}
 	}
 	else
 	{
-		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0); // Write 0 bytes to Atari
+		PioPut(0); // Write 0 bytes to Atari
 		if (m_drives->GetError(m_device) == NEED_UPDATE)
 		{
 			m_errorCode = UNIT_ATTENTION;
@@ -292,26 +332,26 @@ uint32_t Acsi::Command_0A(void)
 
 	if (m_drives->GetError(m_device) == NEED_UPDATE)
 	{
-		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0); // Read 0 bytes from Atari
-		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0); // Write 0 bytes to Atari
+		PioPut(0); // Read 0 bytes from Atari
+		PioPut(0); // Write 0 bytes to Atari
 		m_errorCode = UNIT_ATTENTION;
 		return statusByte;
 	}
 	if (!m_drives->IsWriteable(m_device))
 	{
-		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0); // Read 0 bytes from Atari
-		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0); // Write 0 bytes to Atari
+		PioPut(0); // Read 0 bytes from Atari
+		PioPut(0); // Write 0 bytes to Atari
 		m_errorCode = WRITE_PROTECTED;
 		return statusByte;
 	}
 	num *= LOGICAL_BLOCK;
-	pio_sm_put_blocking(PIO_ACSI, SM_ACSI, num); // Read num bytes from Atari
+	PioPut(num); // Read num bytes from Atari
 	uint32_t* buf = (uint32_t*)m_dataBuf;
 	for (int i = 0; i < (num >> 2); ++i)
 	{
-		buf[i] = pio_sm_get_blocking(PIO_ACSI, SM_ACSI);
+		buf[i] = PioGet();
 	}
-	if (m_drives->Write(m_device, pos, 0, num, m_dataBuf))
+	if (!m_reset && m_drives->Write(m_device, pos, 0, num, m_dataBuf))	// Never write data cut short by a reset.
 	{
 		statusByte = 0;
 	}
@@ -319,7 +359,7 @@ uint32_t Acsi::Command_0A(void)
 	{
 		m_errorCode = MEDIA_ERROR;
 	}
-	pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0);	// Write 0 bytes to Atari
+	PioPut(0);	// Write 0 bytes to Atari
 	return statusByte;
 }
 
@@ -342,12 +382,12 @@ uint32_t Acsi::Command_12(void)
 	m_drives->GetProduct16(m_device, (char*)(m_dataBuf + 16));
 	m_drives->GetVersion4(m_device, (char*)(m_dataBuf + 32));
 
-	pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0);	// Read 0 bytes from Atari
-	pio_sm_put_blocking(PIO_ACSI, SM_ACSI, len);	// Write len bytes to Atari
+	PioPut(0);	// Read 0 bytes from Atari
+	PioPut(len);	// Write len bytes to Atari
 	uint32_t* buf = (uint32_t*)m_dataBuf;
 	for (int i = 0; i < (len >> 2); ++i)
 	{
-		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, buf[i]);
+		PioPut(buf[i]);
 	}
 	return 0;	// Always succeed
 }
@@ -364,11 +404,11 @@ uint32_t Acsi::Command_25(void)
 	m_dataBuf[5] = 0;
 	m_dataBuf[6] = (uint8_t)(LOGICAL_BLOCK >> 8);
 	m_dataBuf[7] = 0;
-	pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0);	// Read 0 bytes from Atari
-	pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 8);	// Write 8 bytes to Atari
+	PioPut(0);	// Read 0 bytes from Atari
+	PioPut(8);	// Write 8 bytes to Atari
 	uint32_t* buf = (uint32_t*)m_dataBuf;
-	pio_sm_put_blocking(PIO_ACSI, SM_ACSI, buf[0]);
-	pio_sm_put_blocking(PIO_ACSI, SM_ACSI, buf[1]);
+	PioPut(buf[0]);
+	PioPut(buf[1]);
 	return 0;	// Always succeed
 }
 
@@ -381,21 +421,21 @@ uint32_t Acsi::Command_28(void)
 	int num = SeekAddressGetNum10(&pos);
 	if (pos > size || (size - pos) < (uint32_t)num)
 	{
-		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0); // Read 0 bytes from Atari
-		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0); // Write 0 bytes to Atari
+		PioPut(0); // Read 0 bytes from Atari
+		PioPut(0); // Write 0 bytes to Atari
 		m_errorCode = MEDIA_ERROR;
 		return statusByte;
 	}
 
 	if (m_drives->GetError(m_device) == NEED_UPDATE)
 	{
-		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0); // Read 0 bytes from Atari
-		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0); // Write 0 bytes to Atari
+		PioPut(0); // Read 0 bytes from Atari
+		PioPut(0); // Write 0 bytes to Atari
 		m_errorCode = UNIT_ATTENTION;
 		return statusByte;
 	}
-	pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0);	// Read 0 bytes from Atari
-	pio_sm_put_blocking(PIO_ACSI, SM_ACSI, num * LOGICAL_BLOCK);	// Write num blocks to Atari
+	PioPut(0);	// Read 0 bytes from Atari
+	PioPut(num * LOGICAL_BLOCK);	// Write num blocks to Atari
 	statusByte = 0;	// This is fine...
 
 	uint32_t endpos = pos + num;
@@ -408,6 +448,10 @@ uint32_t Acsi::Command_28(void)
 		{
 			burst = BURSTLEN;
 		}
+		if (m_reset)
+		{
+			break;	// No point reading more for an Atari that has reset.
+		}
 		if (!m_drives->Read(m_device, pos, 0, burst * LOGICAL_BLOCK, m_dataBuf))
 		{
 			// The data length is already promised to the pio, so keep sending and report the error in the status byte.
@@ -416,7 +460,7 @@ uint32_t Acsi::Command_28(void)
 		}
 		for (uint32_t i = 0; i < ((burst * LOGICAL_BLOCK) >> 2); ++i)
 		{
-			pio_sm_put_blocking(PIO_ACSI, SM_ACSI, buf[i]);
+			PioPut(buf[i]);
 		}
 		pos += BURSTLEN;
 	}
@@ -433,28 +477,28 @@ uint32_t Acsi::Command_2a(void)
 	int num = SeekAddressGetNum10(&pos);
 	if (pos > size || (size - pos) < (uint32_t)num)
 	{
-		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0); // Read 0 bytes from Atari
-		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0); // Write 0 bytes to Atari
+		PioPut(0); // Read 0 bytes from Atari
+		PioPut(0); // Write 0 bytes to Atari
 		m_errorCode = MEDIA_ERROR;
 		return statusByte;
 	}
 
 	if (m_drives->GetError(m_device) == NEED_UPDATE)
 	{
-		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0); // Read 0 bytes from Atari
-		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0); // Write 0 bytes to Atari
+		PioPut(0); // Read 0 bytes from Atari
+		PioPut(0); // Write 0 bytes to Atari
 		m_errorCode = UNIT_ATTENTION;
 		return statusByte;
 	}
 	if (!m_drives->IsWriteable(m_device))
 	{
-		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0); // Read 0 bytes from Atari
-		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0); // Write 0 bytes to Atari
+		PioPut(0); // Read 0 bytes from Atari
+		PioPut(0); // Write 0 bytes to Atari
 		m_errorCode = WRITE_PROTECTED;
 		return statusByte;
 	}
 
-	pio_sm_put_blocking(PIO_ACSI, SM_ACSI, num * LOGICAL_BLOCK); // Read num blocks from Atari
+	PioPut(num * LOGICAL_BLOCK); // Read num blocks from Atari
 	statusByte = 0;	// This is fine...
 
 	uint32_t endpos = pos + num;
@@ -469,7 +513,11 @@ uint32_t Acsi::Command_2a(void)
 		}
 		for (uint32_t i = 0; i < ((burst * LOGICAL_BLOCK) >> 2); ++i)
 		{
-			buf[i] = pio_sm_get_blocking(PIO_ACSI, SM_ACSI);
+			buf[i] = PioGet();
+		}
+		if (m_reset)
+		{
+			break;	// Never write data cut short by a reset.
 		}
 		if (!m_drives->Write(m_device, pos, 0, burst * LOGICAL_BLOCK, m_dataBuf))
 		{
@@ -479,7 +527,7 @@ uint32_t Acsi::Command_2a(void)
 		pos += BURSTLEN;
 	}
 	#undef BURSTLEN
-	pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0);	// Write 0 bytes to Atari
+	PioPut(0);	// Write 0 bytes to Atari
 	return statusByte;
 }
 
@@ -504,8 +552,8 @@ uint32_t Acsi::Command_1f(void)
 		break;
 	default:
 		// Unsupported
-		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0);
-		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0);
+		PioPut(0);
+		PioPut(0);
 		m_errorCode = COMMAND_REJECTED;
 		break;
 	}
@@ -535,8 +583,8 @@ uint32_t Acsi::HardDiskCommand(void)
 	case 0x00:
 	case 0x04:
 	case 0x0b:
-		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0);
-		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0);
+		PioPut(0);
+		PioPut(0);
 		if (m_drives->GetError(m_device) == NEED_UPDATE)
 		{
 			m_errorCode = UNIT_ATTENTION;
@@ -564,8 +612,8 @@ uint32_t Acsi::HardDiskCommand(void)
 		break;
 	default:
 		// Unsupported
-		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0);
-		pio_sm_put_blocking(PIO_ACSI, SM_ACSI, 0);
+		PioPut(0);
+		PioPut(0);
 		m_errorCode = COMMAND_REJECTED;
 		break;
 	}
