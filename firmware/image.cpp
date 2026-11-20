@@ -194,7 +194,7 @@ bool AcsiInterface::Read(uint32_t lun, uint32_t sector, uint32_t offset, uint32_
 		result = f_lseek(&l.image->fileHandle, position) == FR_OK;
 		result &= f_read(&l.image->fileHandle, buffert, length, &numread) == FR_OK;
 		result &= numread == length;
-		l.image->acsiError = result ? RW_ERROR : NO_ERROR;
+		l.image->acsiError = result ? NO_ERROR : RW_ERROR;
 	}
 	mutex_exit(&s_fatfsMutex);
 	return result;
@@ -215,7 +215,7 @@ bool AcsiInterface::Write(uint32_t lun, uint32_t sector, uint32_t offset, uint32
 			result &= f_write(&l.image->fileHandle, buffert, length, &numwrite) == FR_OK;
 			result &= numwrite == length;
 			l.image->usbError = NEED_UPDATE;	// USB needs to be updated.
-			l.image->acsiError = result ? RW_ERROR : NO_ERROR;
+			l.image->acsiError = result ? NO_ERROR : RW_ERROR;
 		}
 		else
 		{
@@ -343,7 +343,7 @@ bool USBInterface::Read(uint32_t lun, uint32_t sector, uint32_t offset, uint32_t
 	if (l.image->usbError != NEED_UPDATE)
 	{
 		result = R_W_CachedSectors(true, lun, sector, offset, length, buffert);
-		l.image->usbError = result ? RW_ERROR : NO_ERROR;
+		l.image->usbError = result ? NO_ERROR : RW_ERROR;
 	}
 	mutex_exit(&s_fatfsMutex);
 	return result;
@@ -359,7 +359,7 @@ bool USBInterface::Write(uint32_t lun, uint32_t sector, uint32_t offset, uint32_
 		if (l.image->drive.usbExposure == WRITEABLE)
 		{
 			result = R_W_CachedSectors(false, lun, sector, offset, length, buffert);
-			l.image->usbError = result ? RW_ERROR : NO_ERROR;
+			l.image->usbError = result ? NO_ERROR : RW_ERROR;
 		}
 		else
 		{
