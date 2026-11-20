@@ -22,6 +22,12 @@ private:
 	int SeekAddressGetNum(uint32_t *seekAddress) const;
 	int SeekAddressGetNum10(uint32_t *seekAddress) const;
 
+	void StartDma(bool toPio, uint32_t* buf, uint32_t words);
+	bool WaitDma(void);
+	bool SendSectorsToAtari(uint32_t pos, uint32_t num);
+	bool ReceiveSectorsFromAtari(uint32_t pos, uint32_t num);
+	uint32_t ReadWriteError(void) const;
+
 	uint32_t Command_03(void);
 	uint32_t Command_08(void);
 	uint32_t Command_0A(void);
@@ -45,7 +51,9 @@ private:
 	int32_t m_device;
 	uint32_t m_errorCode;
 	volatile bool m_reset;	// Set when the Atari resets in the middle of a command.
-	uint8_t* m_dataBuf;
+	uint32_t* m_buf[2];	// Double buffers for SD <-> Atari transfers, CHUNK_SECTORS each.
+	uint8_t* m_dataBuf;	// Alias of m_buf[0], used by the small commands.
+	int m_dmaChan;
 	uint32_t m_cmdBuf[4];
 	uint8_t m_fastResponse[256];
 

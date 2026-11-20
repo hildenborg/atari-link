@@ -2,6 +2,7 @@
 #include <pico/stdlib.h>
 #include <string.h>
 #include <hardware/gpio.h>
+#include <hardware/dma.h>
 #include <bsp/board.h>
 #include "acsi.h"
 #include "acsi_asm.pio.h"
@@ -39,17 +40,31 @@
 #define PIO_ACSI	pio0
 #define SM_ACSI	0
 
+// Sectors per DMA chunk. Two chunk buffers are used, so SD card access
+// for one chunk overlaps the ACSI transfer of the other.
+#define CHUNK_SECTORS	32
+#define CHUNK_WORDS		(CHUNK_SECTORS * LOGICAL_BLOCK / 4)
+
 Acsi::Acsi(void)
 	: m_errorCode(NO_ERROR)
 	, m_reset(false)
+	, m_dmaChan(-1)
 {
-	m_dataBuf = new uint8_t[LOGICAL_BLOCK * 255];
+	// uint32_t arrays keep the buffers word aligned for DMA.
+	m_buf[0] = new uint32_t[CHUNK_WORDS];
+	m_buf[1] = new uint32_t[CHUNK_WORDS];
+	m_dataBuf = (uint8_t*)m_buf[0];
 }
 
 Acsi::~Acsi(void)
 {
 	Stop();
-	delete[] m_dataBuf;
+	if (m_dmaChan >= 0)
+	{
+		dma_channel_unclaim(m_dmaChan);
+	}
+	delete[] m_buf[0];
+	delete[] m_buf[1];
 }
 
 bool Acsi::Init(DriveInterface *drives, int32_t baseId)
@@ -80,6 +95,8 @@ bool Acsi::Init(DriveInterface *drives, int32_t baseId)
 		m_fastResponse[(i << 5) + 0x1f] = 11 - 2;	// 11 bytes icd - 1 we already got, and - 1 for loop. 
 	}
 	
+	m_dmaChan = dma_claim_unused_channel(true);
+
     m_pio_offset = pio_add_program(PIO_ACSI, &AcsiInterface_program);
     AcsiInterface_program_init(PIO_ACSI, SM_ACSI, m_pio_offset, OUT_SIGNALS, DATA_BASE);
 
@@ -150,8 +167,130 @@ uint32_t __not_in_flash_func(Acsi::PioGet)(void)
 	return pio_sm_get(PIO_ACSI, SM_ACSI);
 }
 
+// Starts a DMA transfer of words between buf and the pio fifos, paced by the pio.
+// toPio: buf -> tx fifo (data to Atari). Otherwise rx fifo -> buf (data from Atari).
+void __not_in_flash_func(Acsi::StartDma)(bool toPio, uint32_t* buf, uint32_t words)
+{
+	dma_channel_config c = dma_channel_get_default_config(m_dmaChan);
+	channel_config_set_transfer_data_size(&c, DMA_SIZE_32);
+	channel_config_set_read_increment(&c, toPio);
+	channel_config_set_write_increment(&c, !toPio);
+	channel_config_set_dreq(&c, pio_get_dreq(PIO_ACSI, SM_ACSI, toPio));
+	if (toPio)
+	{
+		dma_channel_configure(m_dmaChan, &c, &PIO_ACSI->txf[SM_ACSI], buf, words, true);
+	}
+	else
+	{
+		dma_channel_configure(m_dmaChan, &c, buf, &PIO_ACSI->rxf[SM_ACSI], words, true);
+	}
+}
+
+// Waits for the DMA started by StartDma to finish.
+// Returns false, with the DMA aborted, if the Atari resets while we wait.
+bool __not_in_flash_func(Acsi::WaitDma)(void)
+{
+	while (dma_channel_is_busy(m_dmaChan))
+	{
+		if (m_reset || !gpio_get(ACSI_RST))	// RST is active low.
+		{
+			m_reset = true;
+			dma_channel_abort(m_dmaChan);
+			return false;
+		}
+	}
+	return !m_reset;
+}
+
+// Error code after a failed drive read or write.
+uint32_t Acsi::ReadWriteError(void) const
+{
+	return m_drives->GetError(m_device) == NEED_UPDATE ? UNIT_ATTENTION : MEDIA_ERROR;
+}
+
+// Sends num sectors starting at pos to the Atari. The byte count must already be given to the pio.
+// The next chunk is read from the SD card while the current one is DMA:d to the pio.
+// All promised data is sent even if the SD card fails (unless the Atari resets); returns false on SD errors.
+bool Acsi::SendSectorsToAtari(uint32_t pos, uint32_t num)
+{
+	bool ok = true;
+	uint32_t endpos = pos + num;
+	uint32_t chunk = num < CHUNK_SECTORS ? num : CHUNK_SECTORS;
+	int cur = 0;
+	if (chunk == 0)
+	{
+		return true;
+	}
+	ok &= m_drives->Read(m_device, pos, 0, chunk * LOGICAL_BLOCK, m_buf[cur]);
+	while (true)
+	{
+		StartDma(true, m_buf[cur], chunk * LOGICAL_BLOCK / 4);
+		uint32_t nextPos = pos + chunk;
+		uint32_t next = endpos - nextPos;
+		if (next > CHUNK_SECTORS)
+		{
+			next = CHUNK_SECTORS;
+		}
+		if (next != 0 && !m_reset)
+		{
+			ok &= m_drives->Read(m_device, nextPos, 0, next * LOGICAL_BLOCK, m_buf[cur ^ 1]);
+		}
+		if (!WaitDma() || next == 0)
+		{
+			break;
+		}
+		pos = nextPos;
+		chunk = next;
+		cur ^= 1;
+	}
+	return ok;
+}
+
+// Receives num sectors from the Atari and writes them starting at pos. The byte count must already be given to the pio.
+// The next chunk is DMA:d from the pio while the current one is written to the SD card.
+// Only completely received chunks are written, so data cut short by a reset is never written.
+// All promised data is received even if the SD card fails; returns false on SD errors.
+bool Acsi::ReceiveSectorsFromAtari(uint32_t pos, uint32_t num)
+{
+	bool ok = true;
+	uint32_t endpos = pos + num;
+	uint32_t chunk = num < CHUNK_SECTORS ? num : CHUNK_SECTORS;
+	int cur = 0;
+	if (chunk == 0)
+	{
+		return true;
+	}
+	StartDma(false, m_buf[cur], chunk * LOGICAL_BLOCK / 4);
+	while (WaitDma())
+	{
+		uint32_t nextPos = pos + chunk;
+		uint32_t next = endpos - nextPos;
+		if (next > CHUNK_SECTORS)
+		{
+			next = CHUNK_SECTORS;
+		}
+		if (next != 0)
+		{
+			StartDma(false, m_buf[cur ^ 1], next * LOGICAL_BLOCK / 4);
+		}
+		ok &= m_drives->Write(m_device, pos, 0, chunk * LOGICAL_BLOCK, m_buf[cur]);
+		if (next == 0)
+		{
+			break;
+		}
+		pos = nextPos;
+		chunk = next;
+		cur ^= 1;
+	}
+	return ok;
+}
+
 void __not_in_flash_func(Acsi::ResetPio)(void)
 {
+	if (m_dmaChan >= 0)
+	{
+		dma_channel_abort(m_dmaChan);	// Never leave a DMA feeding a restarted state machine.
+	}
 	pio_sm_set_enabled(PIO_ACSI, SM_ACSI, false);
 	m_reset = false;
 #ifdef SERIAL_LOGGING
@@ -316,29 +455,23 @@ uint32_t Acsi::Command_08(void)
 		m_errorCode = MEDIA_ERROR;
 		return statusByte;
 	}
+	if (m_drives->GetError(m_device) == NEED_UPDATE)
+	{
+		PioPut(0); // Read 0 bytes from Atari
+		PioPut(0); // Write 0 bytes to Atari
+		m_errorCode = UNIT_ATTENTION;
+		return statusByte;
+	}
 	PioPut(0);	// Read 0 bytes from Atari
-	num *= LOGICAL_BLOCK;
-	if (m_drives->Read(m_device, pos, 0, num, m_dataBuf))
+	PioPut(num * LOGICAL_BLOCK);	// Write num blocks to Atari
+	// The data length is already promised to the pio, so errors are reported in the status byte.
+	if (SendSectorsToAtari(pos, num))
 	{
 		statusByte = 0;
-		PioPut(num);	// Write num bytes to Atari
-		uint32_t* buf = (uint32_t*)m_dataBuf;
-		for (int i = 0; i < (num >> 2); ++i)
-		{
-			PioPut(buf[i]);
-		}
 	}
 	else
 	{
-		PioPut(0); // Write 0 bytes to Atari
-		if (m_drives->GetError(m_device) == NEED_UPDATE)
-		{
-			m_errorCode = UNIT_ATTENTION;
-		}
-		else
-		{
-			m_errorCode = MEDIA_ERROR;
-		}
+		m_errorCode = ReadWriteError();
 	}
 	return statusByte;
 }
@@ -372,20 +505,14 @@ uint32_t Acsi::Command_0A(void)
 		m_errorCode = WRITE_PROTECTED;
 		return statusByte;
 	}
-	num *= LOGICAL_BLOCK;
-	PioPut(num); // Read num bytes from Atari
-	uint32_t* buf = (uint32_t*)m_dataBuf;
-	for (int i = 0; i < (num >> 2); ++i)
-	{
-		buf[i] = PioGet();
-	}
-	if (!m_reset && m_drives->Write(m_device, pos, 0, num, m_dataBuf))	// Never write data cut short by a reset.
+	PioPut(num * LOGICAL_BLOCK); // Read num blocks from Atari
+	if (ReceiveSectorsFromAtari(pos, num) && !m_reset)
 	{
 		statusByte = 0;
 	}
 	else
 	{
-		m_errorCode = MEDIA_ERROR;
+		m_errorCode = ReadWriteError();
 	}
 	PioPut(0);	// Write 0 bytes to Atari
 	return statusByte;
@@ -464,35 +591,15 @@ uint32_t Acsi::Command_28(void)
 	}
 	PioPut(0);	// Read 0 bytes from Atari
 	PioPut(num * LOGICAL_BLOCK);	// Write num blocks to Atari
-	statusByte = 0;	// This is fine...
-
-	uint32_t endpos = pos + num;
-	#define BURSTLEN 255
-	uint32_t* buf = (uint32_t*)m_dataBuf;
-	while (pos < endpos)
+	// The data length is already promised to the pio, so errors are reported in the status byte.
+	if (SendSectorsToAtari(pos, num))
 	{
-		uint32_t burst = endpos - pos;
-		if (burst > BURSTLEN)
-		{
-			burst = BURSTLEN;
-		}
-		if (m_reset)
-		{
-			break;	// No point reading more for an Atari that has reset.
-		}
-		if (!m_drives->Read(m_device, pos, 0, burst * LOGICAL_BLOCK, m_dataBuf))
-		{
-			// The data length is already promised to the pio, so keep sending and report the error in the status byte.
-			statusByte = 2;
-			m_errorCode = MEDIA_ERROR;
-		}
-		for (uint32_t i = 0; i < ((burst * LOGICAL_BLOCK) >> 2); ++i)
-		{
-			PioPut(buf[i]);
-		}
-		pos += BURSTLEN;
+		statusByte = 0;
 	}
-	#undef BURSTLEN
+	else
+	{
+		m_errorCode = ReadWriteError();
+	}
 	return statusByte;
 }
 
@@ -527,34 +634,14 @@ uint32_t Acsi::Command_2a(void)
 	}
 
 	PioPut(num * LOGICAL_BLOCK); // Read num blocks from Atari
-	statusByte = 0;	// This is fine...
-
-	uint32_t endpos = pos + num;
-	#define BURSTLEN 255
-	uint32_t* buf = (uint32_t*)m_dataBuf;
-	while (pos < endpos)
+	if (ReceiveSectorsFromAtari(pos, num) && !m_reset)
 	{
-		uint32_t burst = endpos - pos;
-		if (burst > BURSTLEN)
-		{
-			burst = BURSTLEN;
-		}
-		for (uint32_t i = 0; i < ((burst * LOGICAL_BLOCK) >> 2); ++i)
-		{
-			buf[i] = PioGet();
-		}
-		if (m_reset)
-		{
-			break;	// Never write data cut short by a reset.
-		}
-		if (!m_drives->Write(m_device, pos, 0, burst * LOGICAL_BLOCK, m_dataBuf))
-		{
-			statusByte = 2;
-			m_errorCode = MEDIA_ERROR;
-		}
-		pos += BURSTLEN;
+		statusByte = 0;
 	}
-	#undef BURSTLEN
+	else
+	{
+		m_errorCode = ReadWriteError();
+	}
 	PioPut(0);	// Write 0 bytes to Atari
 	return statusByte;
 }

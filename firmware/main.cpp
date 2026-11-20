@@ -28,18 +28,11 @@
 		One way to avoit this, is to create an empty file in the root of every drive and call it
 		"System Volume Information", and Windows will be unable to write that information.
 		
-	Testing:
-	Need to test a lot more HD configurations.
-	ICD test drive writes to boot sector and destroys drive... Could have been a virus on my test drive...
-	
 	Cleanup:
 	image.h and image.cpp contains a many classes that should be in their own files.
 	usb.h and usb.cpp contains a serial class that should have its own files.
 	Maybe a better folder hierarchy?
 
-	Optimizations:
-	Double buffered DMA for acsi read/write
-		https://github.com/raspberrypi/pico-examples/blob/master/pio/logic_analyser/logic_analyser.c
 */
 
 namespace
