@@ -190,7 +190,7 @@ bool AcsiInterface::Read(uint32_t lun, uint32_t sector, uint32_t offset, uint32_
 	if (l.image->acsiError != NEED_UPDATE)
 	{
 		unsigned int numread = 0;
-		uint32_t position = ((sector + l.l_startSector) * LOGICAL_BLOCK) + offset;
+		FSIZE_t position = ((FSIZE_t)(sector + l.l_startSector) * LOGICAL_BLOCK) + offset;
 		result = f_lseek(&l.image->fileHandle, position) == FR_OK;
 		result &= f_read(&l.image->fileHandle, buffert, length, &numread) == FR_OK;
 		result &= numread == length;
@@ -210,7 +210,7 @@ bool AcsiInterface::Write(uint32_t lun, uint32_t sector, uint32_t offset, uint32
 		if (l.image->drive.acsiExposure == WRITEABLE)
 		{
 			unsigned int numwrite = 0;
-			uint32_t position = ((sector + l.l_startSector) * LOGICAL_BLOCK) + offset;
+			FSIZE_t position = ((FSIZE_t)(sector + l.l_startSector) * LOGICAL_BLOCK) + offset;
 			result = f_lseek(&l.image->fileHandle, position) == FR_OK;
 			result &= f_write(&l.image->fileHandle, buffert, length, &numwrite) == FR_OK;
 			result &= numwrite == length;
@@ -265,12 +265,12 @@ bool USBInterface::R_W_CachedSectors(bool read_write, uint32_t lun, uint32_t sec
 	bool allCached = true;
 	
 	// Convert sectors to byte positions
-	uint32_t startPosition = (l.l_startSector * LOGICAL_BLOCK) + (sector * l.p_sectorSize) + offset;
+	FSIZE_t startPosition = ((FSIZE_t)l.l_startSector * LOGICAL_BLOCK) + ((FSIZE_t)sector * l.p_sectorSize) + offset;
 	offset = startPosition % LOGICAL_BLOCK;
 	uint32_t blockLen = LOGICAL_BLOCK - offset;
 	// Now we have values that will work with our cached sectors.
 
-	uint32_t position = startPosition;
+	FSIZE_t position = startPosition;
 	while (length != 0 && result)
 	{
 		if (blockLen > length)
@@ -698,7 +698,7 @@ uint8_t* DriveCollection::GetLogicalBlock(Image* image, uint32_t block)
 {
 	unsigned int numread = 0;
 	uint8_t *pt_block = new uint8_t[LOGICAL_BLOCK];
-	f_lseek(&image->fileHandle, block * LOGICAL_BLOCK);
+	f_lseek(&image->fileHandle, (FSIZE_t)block * LOGICAL_BLOCK);
 	f_read(&image->fileHandle, pt_block, LOGICAL_BLOCK, &numread);
 	return pt_block;
 }
