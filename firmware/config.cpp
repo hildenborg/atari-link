@@ -61,6 +61,7 @@ Config::Config(void)
 	, m_baseId(0)
 {
 	Drive d;
+	memcpy(d.imagefile, default_image_name, sizeof(default_image_name));
 	d.acsiExposure = WRITEABLE;
 	d.usbExposure = WRITEABLE;
 	d.partToLun = true;
