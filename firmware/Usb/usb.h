@@ -9,7 +9,7 @@ class DriveInterface;
 void InitUSB(DriveInterface *drives);
 void USB_main(void);
 
-#define SERIAL_BUFFER_LEN 1024
+#define SERIAL_BUFFER_LEN 2048
 
 class Serial
 {
