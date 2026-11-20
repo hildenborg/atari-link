@@ -308,6 +308,14 @@ uint32_t Acsi::Command_08(void)
 	uint32_t statusByte = 2;
 	uint32_t pos = 0;
 	int num = SeekAddressGetNum(&pos);
+	uint32_t size = m_drives->GetLSectorCount(m_device);
+	if (pos > size || (size - pos) < (uint32_t)num)
+	{
+		PioPut(0); // Read 0 bytes from Atari
+		PioPut(0); // Write 0 bytes to Atari
+		m_errorCode = MEDIA_ERROR;
+		return statusByte;
+	}
 	PioPut(0);	// Read 0 bytes from Atari
 	num *= LOGICAL_BLOCK;
 	if (m_drives->Read(m_device, pos, 0, num, m_dataBuf))
@@ -341,6 +349,14 @@ uint32_t Acsi::Command_0A(void)
 	uint32_t statusByte = 2;
 	uint32_t pos = 0;
 	int num = SeekAddressGetNum(&pos);
+	uint32_t size = m_drives->GetLSectorCount(m_device);
+	if (pos > size || (size - pos) < (uint32_t)num)
+	{
+		PioPut(0); // Read 0 bytes from Atari
+		PioPut(0); // Write 0 bytes to Atari
+		m_errorCode = MEDIA_ERROR;
+		return statusByte;
+	}
 
 	if (m_drives->GetError(m_device) == NEED_UPDATE)
 	{
