@@ -154,7 +154,9 @@ void __not_in_flash_func(Acsi::ResetPio)(void)
 {
 	pio_sm_set_enabled(PIO_ACSI, SM_ACSI, false);
 	m_reset = false;
+#ifdef SERIAL_LOGGING
 	PrintPioInfo();
+#endif
 	// Wait for reset and a1+cs to be set high.
 	uint32_t mask = (1 << ACSI_RST) | (1 << ACSI_A1) | (1 << ACSI_CS);
 	while((gpio_get_all() & mask) != mask)
@@ -656,7 +658,8 @@ void Acsi::PrintPioInfo(void)
 	// Get isr count
 	uint32_t isrCount = 0;
 	uint32_t inNull1 = pio_encode_in(pio_null, 1);
-	while (rxLevel == pio_sm_get_rx_fifo_level(PIO_ACSI, SM_ACSI))
+	// With a full rx fifo the forced autopush would stall forever.
+	while (!pio_sm_is_rx_fifo_full(PIO_ACSI, SM_ACSI) && rxLevel == pio_sm_get_rx_fifo_level(PIO_ACSI, SM_ACSI))
 	{
 		pio_sm_exec_wait_blocking(PIO_ACSI, SM_ACSI, inNull1);
 		isrCount++;
