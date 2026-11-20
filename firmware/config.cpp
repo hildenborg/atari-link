@@ -263,7 +263,7 @@ bool Config::DriveProperty(char* txt, size_t length, size_t* p)
 		}
 		else if (0 == strcmp("Version", property))
 		{
-			CopyFillSpace(value, drive.volume, 4);
+			CopyFillSpace(value, drive.version, 4);
 		}
 		else
 		{

@@ -681,7 +681,7 @@ void DriveCollection::ModifyMBR(uint8_t* pt_mbr, uint8_t partitionType[4], uint3
 		pt_a[0] = 0x80; // bootable. Some detect it as active.
 		pt_a[4] = partitionType[p];
 		SetUint32LE(pt_a + 8, partitionSectors[(p * 2)]);
-		SetUint32LE(pt_a + 12, partitionSectors[(p * 2)] + 1);
+		SetUint32LE(pt_a + 12, partitionSectors[(p * 2) + 1]);
 	}
 	// Magic number
 	pt_mbr[0x1fe] = 0x55;
