@@ -1,7 +1,8 @@
+#include "usb/msc_disk.h"
 #include <bsp/board.h>
-#include "tusb.h"
-#include "../image.h"
-#include "usb.h"
+#include <tusb.h>
+#include "drive/drive_interface.h"
+#include "usb/serial.h"
 
 #define DISK_LOGGING
 

@@ -7,11 +7,11 @@
 #include <pico/multicore.h>
 #include <ff.h>
 #include <hw_config.h>
-#include "acsi.h"
-#include "image.h"
-#include "Usb/usb.h"
-//#include "FatFs/ff.h"
-#include "config.h"
+#include "acsi/acsi.h"
+#include "config/config.h"
+#include "drive/drive_collection.h"
+#include "usb/serial.h"
+#include "usb/usb.h"
 
 /*
 	Bugs:
@@ -27,12 +27,6 @@
 		to destroy any drive that have both sides as WRITEABLE.
 		One way to avoit this, is to create an empty file in the root of every drive and call it
 		"System Volume Information", and Windows will be unable to write that information.
-		
-	Cleanup:
-	image.h and image.cpp contains a many classes that should be in their own files.
-	usb.h and usb.cpp contains a serial class that should have its own files.
-	Maybe a better folder hierarchy?
-
 */
 
 namespace

@@ -1,0 +1,13 @@
+#ifndef DRIVE_ERROR_DEFINED
+#define DRIVE_ERROR_DEFINED
+
+
+enum DriveError
+{
+	NO_ERROR,
+	NEED_UPDATE,
+	WRITE_PROTECTED,
+	RW_ERROR
+}; // DriveError
+
+#endif // DRIVE_ERROR_DEFINED

@@ -28,32 +28,48 @@ project(atari_link C CXX ASM)
 pico_sdk_init()
 
 add_executable(atari_link
-  main.cpp
-  acsi.cpp
-  image.cpp
-  config.cpp
-  spi_config.cpp
+  src/main.cpp
+  src/acsi/acsi.cpp
+  src/config/config.cpp
+  src/drive/acsi_interface.cpp
+  src/drive/drive_collection.cpp
+  src/drive/drive_interface.cpp
+  src/drive/fatfs_lock.cpp
+  src/drive/lun.cpp
+  src/drive/usb_diff_log.cpp
+  src/drive/usb_interface.cpp
+  src/sd/spi_config.cpp
+  src/usb/msc_disk.cpp
+  src/usb/serial.cpp
+  src/usb/usb.cpp
+  src/usb/usb_descriptors.c
+)
+
+# Includes are written relative to the source folder, e.g. "drive/image.h".
+target_include_directories(atari_link PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
+
+target_compile_definitions(atari_link PRIVATE
+  CFG_TUSB_CONFIG_FILE="${CMAKE_CURRENT_LIST_DIR}/src/usb/tusb_config.h"
 )
 
 pico_set_program_name(atari_link "atari-link")
 pico_set_program_version(atari_link "0.1")
 
-#add_subdirectory (FatFs)
 add_subdirectory(no-OS-FatFS-SD-SPI-RPi-Pico/FatFs_SPI build)
-add_subdirectory (Usb)
 target_link_libraries(atari_link LINK_PUBLIC
 	pico_stdlib
 	pico_multicore
 	hardware_pio
 	hardware_dma
-	USB
+	tinyusb_device
+	tinyusb_board
 	FatFs_SPI
 	)
 	
 pico_enable_stdio_usb(atari_link 0)
 pico_enable_stdio_uart(atari_link 0)
 
-pico_generate_pio_header(atari_link ${CMAKE_CURRENT_LIST_DIR}/acsi_asm.pio)
+pico_generate_pio_header(atari_link ${CMAKE_CURRENT_LIST_DIR}/src/acsi/acsi_asm.pio)
 
 pico_add_extra_outputs(atari_link)
 

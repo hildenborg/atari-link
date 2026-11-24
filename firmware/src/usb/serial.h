@@ -1,13 +1,10 @@
-#ifndef USB_DEFINED
-#define USB_DEFINED
+#ifndef SERIAL_DEFINED
+#define SERIAL_DEFINED
 
+#include <cstdint>
 #include <pico/sync.h>
 
 class Config;
-class DriveInterface;
-
-void InitUSB(DriveInterface *drives);
-void USB_main(void);
 
 #define SERIAL_BUFFER_LEN 2048
 
@@ -35,4 +32,4 @@ private:
 	
 }; // Serial
 
-#endif // USB_DEFINED
+#endif // SERIAL_DEFINED

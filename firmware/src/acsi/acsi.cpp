@@ -1,13 +1,14 @@
+#include "acsi/acsi.h"
 #include <stdio.h>
 #include <pico/stdlib.h>
 #include <string.h>
 #include <hardware/gpio.h>
 #include <hardware/dma.h>
 #include <bsp/board.h>
-#include "acsi.h"
 #include "acsi_asm.pio.h"
-#include "image.h"
-#include "Usb/usb.h"
+#include "drive/drive_interface.h"
+#include "drive/logical_block.h"
+#include "usb/serial.h"
 
 // Acsi return codes
 #define NO_ERROR 			0x000000
