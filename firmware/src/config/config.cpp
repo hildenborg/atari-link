@@ -76,7 +76,7 @@ Config::Config(void)
 		m_drives[i] = d;
 	}
 	
-	m_com.baud = 9600;
+	m_com.baud = 19200;
 	m_com.stop = 1;
 	m_com.parity = 0;
 }
