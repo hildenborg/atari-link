@@ -1,0 +1,79 @@
+; SCSI target REQ/ACK handshake for asynchronous transfers.
+;
+; Pin use (GPIO numbers in board/pins.h):
+;	out pins:		DB0-DB7 and DBP (9 consecutive pins). Output is inverted in the GPIO pads,
+;					so a 1 bit asserts the bus line (SCSI lines are active low).
+;	in pins:		DB0-DB7 (8 consecutive pins). Input is inverted in the GPIO pads,
+;					so an asserted bus line reads as 1.
+;	side-set pin:	REQ, through a 74LVT125. 0 asserts REQ, 1 releases it.
+;	ACK is read with "wait gpio", it is low when asserted.
+;
+; Both programs first pull the number of bytes - 1, so the state machine never
+; asserts REQ for more bytes than the C++ code has asked for.
+
+.define PUBLIC ACK_PIN 18
+
+; Target to initiator (DATA IN, STATUS, MESSAGE IN).
+; Every byte is a 32 bit word in the TX fifo, with the parity bit in bit 8.
+; When all bytes are sent, a word is pushed to the RX fifo to tell that the
+; last handshake is complete.
+.program scsi_tx
+.side_set 1 opt
+	pull block			side 1		; Number of bytes - 1
+	out x, 32
+tx_byte:
+	pull block
+	out pins, 9			[7]			; Put data on the bus.
+	nop					[2]			; Deskew + cable skew: 11 cycles is 73ns at 150MHz (55ns needed).
+	wait 0 gpio ACK_PIN	side 0		; Assert REQ, wait for ACK.
+	wait 1 gpio ACK_PIN	side 1		; Release REQ, wait for ACK to be released.
+	jmp x-- tx_byte
+	in null, 32						; Tell the C++ code that we are done.
+	push block
+
+; Initiator to target (DATA OUT, COMMAND, MESSAGE OUT).
+; Every received byte is pushed to the RX fifo, in bits 0-7.
+.program scsi_rx
+.side_set 1 opt
+	pull block			side 1		; Number of bytes - 1
+	out x, 32
+rx_byte:
+	wait 0 gpio ACK_PIN	side 0		; Assert REQ, wait for ACK. Data is valid when ACK is asserted.
+	in pins, 8			side 1		; Read data and release REQ. Autopush.
+	wait 1 gpio ACK_PIN				; Wait for ACK to be released.
+	jmp x-- rx_byte
+
+% c-sdk {
+
+#include "hardware/gpio.h"
+
+// Shared setup for both programs. The data pins and REQ must be given to the pio by the caller.
+static inline void scsi_bus_program_init(PIO pio, uint sm, uint offset, pio_sm_config c, uint dataPin, uint reqPin, bool tx)
+{
+	sm_config_set_out_pins(&c, dataPin, 9);
+	sm_config_set_in_pins(&c, dataPin);
+	sm_config_set_sideset_pins(&c, reqPin);
+	if (tx)
+	{
+		sm_config_set_out_shift(&c, true, false, 32);	// Right, no autopull.
+		sm_config_set_in_shift(&c, false, false, 32);
+	}
+	else
+	{
+		sm_config_set_out_shift(&c, true, false, 32);
+		sm_config_set_in_shift(&c, false, true, 8);		// Left, autopush every byte.
+	}
+	pio_sm_init(pio, sm, offset, &c);
+}
+
+static inline void scsi_tx_program_init(PIO pio, uint sm, uint offset, uint dataPin, uint reqPin)
+{
+	scsi_bus_program_init(pio, sm, offset, scsi_tx_program_get_default_config(offset), dataPin, reqPin, true);
+}
+
+static inline void scsi_rx_program_init(PIO pio, uint sm, uint offset, uint dataPin, uint reqPin)
+{
+	scsi_bus_program_init(pio, sm, offset, scsi_rx_program_get_default_config(offset), dataPin, reqPin, false);
+}
+
+%}

@@ -1,6 +1,7 @@
 #include "usb/serial.h"
 #include <pico/stdlib.h>
 #include <tusb.h>
+#include "board/pins.h"
 #include "config/config.h"
 
 Serial *Serial::self = NULL;
@@ -16,11 +17,11 @@ Serial::Serial(Config* config)
 	uart_set_format(uart0, 8, com.stop, com.parity == 0 ? UART_PARITY_NONE : (com.parity == 1 ? UART_PARITY_ODD : UART_PARITY_EVEN));
 	uart_set_hw_flow(uart0, true, true);	// We want hardware flow with the ST, as gdbserver uses it to detect break signal.
  
-    // Set the GPIO pin mux to the UART - 0 is TX, 1 is RX
-    gpio_set_function(0, GPIO_FUNC_UART);
-    gpio_set_function(1, GPIO_FUNC_UART);
-    gpio_set_function(2, GPIO_FUNC_UART);
-    gpio_set_function(3, GPIO_FUNC_UART);
+    // Set the GPIO pin mux to the UART
+    gpio_set_function(PIN_UART_TX, GPIO_FUNC_UART);
+    gpio_set_function(PIN_UART_RX, GPIO_FUNC_UART);
+    gpio_set_function(PIN_UART_CTS, GPIO_FUNC_UART);
+    gpio_set_function(PIN_UART_RTS, GPIO_FUNC_UART);
 	
 }
 

@@ -1,5 +1,6 @@
 #include <hw_config.h>
 #include <diskio.h>
+#include "board/pins.h"
 
 /**************************************************
 spi config
@@ -15,9 +16,9 @@ extern "C" {
 static spi_t spis[] = {  // One for each SPI.
     {
         .hw_inst = spi0,  // SPI component
-        .miso_gpio = 16, // GPIO number (not pin number)
-        .mosi_gpio = 19,
-        .sck_gpio = 18,
+        .miso_gpio = PIN_SD_MISO, // GPIO number (not pin number)
+        .mosi_gpio = PIN_SD_MOSI,
+        .sck_gpio = PIN_SD_SCK,
 
         /* The choice of SD card matters! SanDisk runs at the highest speed. PNY
            can only mangage 5 MHz. Those are all I've tried. */
@@ -35,7 +36,7 @@ static sd_card_t sd_cards[] = {  // One for each SD card
     {
         .pcName = "",           // Name used to mount device
         .spi = &spis[0],          // Pointer to the SPI driving this card
-        .ss_gpio = 17,            // The SPI slave select GPIO for this SD card
+        .ss_gpio = PIN_SD_CS,            // The SPI slave select GPIO for this SD card
         .use_card_detect = false,
         .card_detect_gpio = 22,   // Card detect
         .card_detected_true = 1,  // What the GPIO read returns when a card is

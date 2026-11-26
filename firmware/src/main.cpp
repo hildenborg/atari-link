@@ -7,7 +7,11 @@
 #include <pico/multicore.h>
 #include <ff.h>
 #include <hw_config.h>
+#ifdef ATARI_LINK_SCSI
+#include "scsi/scsi.h"
+#else
 #include "acsi/acsi.h"
+#endif
 #include "config/config.h"
 #include "drive/drive_collection.h"
 #include "usb/serial.h"
@@ -33,14 +37,18 @@ namespace
 {
 	static Config config;
 	static DriveCollection drives;
-	static Acsi acsi;
+#ifdef ATARI_LINK_SCSI
+	static Scsi bus;
+#else
+	static Acsi bus;
+#endif
 	static int dbg_code = 0;
 };
 
 	
 void core1_main(void)
 {	
-	acsi.Start();
+	bus.Start();
 }
 
 void SetDbgCode(int v)
@@ -99,12 +107,11 @@ int main(int argc, char **argv)
 			}
 			Serial serial(&config);
 			InitUSB(drives.GetUSBInterface());
-			if (acsi.Init(drives.GetAcsiInterface(), config.GetBaseId()))
+			if (bus.Init(drives.GetAcsiInterface(), config.GetBaseId()))
 			{
 				SetDbgCode(3);
 				multicore_launch_core1(core1_main);
 				USB_main();
-				acsi.Stop();
 				SetDbgCode(15); // Dbg code 1111
 			}
 		}

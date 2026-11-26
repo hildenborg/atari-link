@@ -308,7 +308,8 @@ bool Config::SystemProperty(char* txt, size_t length, size_t* p)
 	bool result = PropertyValue(txt, length, p, &property, &value);
 	if (result)
 	{
-		if (0 == strcmp("AcsiId", property))
+		// ScsiId is the same setting, for the SCSI variant.
+		if (0 == strcmp("AcsiId", property) || 0 == strcmp("ScsiId", property))
 		{
 			result = 1 == sscanf(value, "%d", &m_baseId);
 		}

@@ -11,6 +11,10 @@ It is designed to be "easy" to build by hand, and the wiki have more information
 The hardware is based around the Raspberry Pico and the formware source is in the "firmware" directory.  
 The project is dependent on a submodule, so do not forget to do `git submodule init` and `git submodule update` after cloning this git repository.  
 
+## SCSI variant
+There is also a design for the SCSI port of the Atari TT, in the "kicad_scsi" directory, built around an RP2350B. It is not yet built or tested; see the [wiki page](https://github.com/hildenborg/atari-link/wiki/ScsiVariant).  
+The firmware for it is built from the same source with `cmake -B build_scsi -DATARI_LINK_VARIANT=SCSI`.
+
 ## Setup
 If you have built the hardware, and just want to get going, then download [atari-link.zip](https://github.com/hildenborg/atari-link/releases/download/Release2/atari_link.zip) and extract its contents.  
 Flash the Pico with "atari_link.uf2" and put "config.txt, "tos32mb_ahdi5_boot.img" and "tos32mb_gdbsrv.img" on a FAT32 formatted SD-card.  
